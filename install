@@ -1,0 +1,7 @@
+#!/bin/bash
+
+if [[ ! -z "$DOKKU_DEV" ]]; then
+  ./commands mongodb:install
+else
+  dokku mongodb:install
+fi

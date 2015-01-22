@@ -1,0 +1,424 @@
+#!/bin/bash
+#set -e;
+
+_path=".o_mongodb"
+version="1.0"
+db_image="ohardy/mongodb"
+
+APP=$2
+OLDHOME=$HOME
+HOME="$DOKKU_ROOT/$_path"
+
+check_already_exists() {
+  if [[ -f "$HOME/db_$APP" ]]; then
+    echo "Database configured already exists with name : $APP"
+    exit 1
+  fi
+}
+
+check_exists() {
+  if [[ ! -f "$HOME/db_$APP" ]]&&[[ ! -f "$HOME/link_$APP" ]]; then
+    echo "No database configured with name : $APP"
+    exit 1
+  fi
+}
+
+check_app() {
+  if [[ -z "$APP" ]]; then
+    echo "You must specify an app name"
+    exit 1
+  fi
+}
+
+check_container() {
+  if [[ -z "$id" ]]; then
+    echo "MongoDB container not started cannot continue. Start with dokku mongodb:start"
+    exit 1
+  fi
+}
+
+load_ip_and_container() {
+  id=$(docker ps | grep "$db_image":latest | grep "manage start" | awk '{print $1}')
+  container_name=""
+  if [[ -n "$id" ]]; then
+    ip_and_port=$(docker port ${id} 27017)
+    ip=$(echo "$ip_and_port" | cut -d ':' -f 1)
+    private_ip=$(docker inspect ${id} | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
+    port=$(echo "$ip_and_port" | cut -d ':' -f 2)
+    container_name=$(docker inspect -f "{{ .Name }}" $id)
+  fi
+
+  if [[ -n "$container_name" ]]; then
+    _manage="-v $HOME/shared:/shared --link $container_name:db $db_image"
+  else
+    _manage="-v $HOME/shared:/shared $db_image"
+  fi
+}
+
+manage_ti() {
+  docker run -t -i $_manage $*
+}
+
+manage() {
+  docker run $_manage $*
+}
+
+do_bash() {
+  _envs=$(env_for)
+  _cmd="docker run -t -i $_envs $db_image bash"
+  $_cmd
+}
+
+db_url() {
+  _app=$1
+
+  _database=$(cat "$HOME/db_$_app")
+  _database_pw=$(cat "$HOME/pass_$_app")
+
+  echo "mongodb://${_database}:${_database_pw}@${private_ip}:${port}/${_database}"
+}
+
+database_name() {
+  echo "$1" | cut -c 1-16 | tr .- _
+}
+
+migrate() {
+  if [[ ! -f "$HOME/version" ]]; then
+    cd "$HOME"
+    _files=$(ls pass_* 2> /dev/null)
+    for f in $_files; do
+      _app_to_migrate=$(echo "$f" | cut -d _ -f 2)
+      _database=$(database_name "$_app_to_migrate")
+      echo "$_database" > "$HOME/db_$_app_to_migrate"
+
+      if [[ -d "$DOKKU_ROOT/$_app_to_migrate" ]]; then
+        dokku config:unset "$_app_to_migrate" DATABASE_URL
+      fi
+    done
+
+  fi
+  echo "$version" > "$HOME/version"
+}
+
+env_for() {
+  if [[ -n "$1" ]]; then
+    _app=$1
+    if [[ -f "$HOME/db_$_app" ]]; then
+      _url=$(db_url "$APP")
+    elif [[ -f "$HOME/link_$_app" ]]; then
+      _app=$(cat "$HOME/link_$_app")
+      _url=$(db_url "$_app")
+    fi
+
+    if [[ -n "$_url" ]]; then
+      if [[ -f "$HOME/db_$_app" ]]&&[[ -f "$HOME/pass_$_app" ]]; then
+        _database=$(cat "$HOME/db_$_app")
+        _database_pw=$(cat "$HOME/pass_$_app")
+
+        echo "-e DATABASE_URL=$_url -e MONGODB_URL=$_url -e DB_TYPE=mongodb -e DB_HOST=$private_ip -e DB_PORT=$port -e DB_NAME=$_database -e DB_USER=$_database -e DB_PASS=$_database_pw"
+      fi
+    fi
+  else
+    _database="admin"
+    _database_pw=$(cat "$HOME/admin_pw")
+
+    echo "-e DB_HOST=$private_ip -e DB_PORT=$port -e DB_NAME=$_database -e DB_USER=root -e DB_PASS=$_database_pw"
+
+  fi
+}
+
+restart_app() {
+  _app=$1
+  if [[ -n "$_app" ]]&&[[ -d "$DOKKU_ROOT/$_app" ]]; then
+    echo "-----> Restarting application : $_app"
+    dokku release $_app
+    dokku deploy $_app
+  fi
+}
+
+restart_apps() {
+  echo "-----> Restarting applications"
+  _apps=()
+
+  cd "$HOME"
+  _files=$(ls pass_* 2> /dev/null)
+  for f in $_files; do
+    _apps+=($(echo "$f" | cut -d _ -f 2))
+  done
+
+  _files=$(ls link_* 2> /dev/null)
+  for f in $_files; do
+    _apps+=($(cat "$HOME/$f"))
+  done
+
+  _apps=$(echo "${_apps[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+  for _app in $_apps; do
+    restart_app $_app
+  done
+}
+
+load_ip_and_container
+
+admin_pw=""
+if [[ -f "$HOME/admin_pw" ]]; then
+  admin_pw=$(cat "$HOME/admin_pw")
+fi
+
+case "$1" in
+  mongodb:admin_console)
+    check_container
+
+    manage_ti admin_console "$admin_pw"
+    ;;
+
+  mongodb:console)
+    check_container
+    check_app
+    check_exists
+
+    database=$(cat "$HOME/db_$APP")
+    database_pw=$(cat "$HOME/pass_$APP")
+
+    manage_ti console "$database" "$database_pw"
+    ;;
+
+  mongodb:url)
+    check_container
+    check_app
+    check_exists
+
+    if [[ -f "$HOME/db_$APP" ]]; then
+      db_url "$APP"
+    elif [[ -f "$HOME/link_$APP" ]]; then
+      APP=$(cat "$HOME/link_$APP")
+      db_url "$APP"
+    fi
+    ;;
+  mongodb:create)
+    check_container
+    check_app
+    check_already_exists
+
+    new_password=$(openssl rand -base64 32|base64)
+    database=$(database_name "$APP")
+    echo "$database" > "$HOME/db_$APP"
+    echo "$new_password" > "$HOME/pass_$APP"
+    chmod 700 "$HOME/db_$APP"
+    chmod 700 "$HOME/pass_$APP"
+
+    manage create "$database" "$admin_pw" "$new_password"
+    ;;
+  mongodb:delete)
+    check_container
+    check_app
+    check_exists
+
+    database=$(cat "$HOME/db_$APP")
+    manage delete "$database" "$admin_pw"
+
+    rm -f "$HOME/db_$APP"
+    rm -f "$HOME/pass_$APP"
+
+    ;;
+
+  mongodb:list)
+    check_container
+
+    manage list "$admin_pw"
+    ;;
+
+  mongodb:bash)
+    do_bash
+    ;;
+
+  mongodb:pre_build)
+    if [[ -z "$id" ]]; then
+      if [[ -d "$DOKKU_ROOT/$APP" ]]; then
+        if [[ -n "$DOKKU_DEV" ]]; then
+          ./commands mongodb:start
+        else
+          dokku mongodb:start
+        fi
+
+        sleep 5
+      fi
+    fi
+
+    ;;
+
+  mongodb:start)
+    if [[ "$id" != "" ]]; then
+      echo "MongoDB container already running with ID: ${id}"
+    else
+      echo "-----> Starting MongoDB server"
+      docker run -d -p 127.0.0.1:27017:27017 -v "$HOME/data":"/data/db" "$db_image" start
+    fi
+    restart_apps
+    ;;
+
+  mongodb:restart)
+    if [[ ! -z "$DOKKU_DEV" ]]; then
+      ./commands mongodb:stop
+      ./commands mongodb:start
+    else
+      dokku mongodb:stop
+      dokku mongodb:start
+    fi
+    ;;
+
+  mongodb:init)
+    if [[ "$id" != "" ]]; then
+      echo "MongoDB container already running with ID: ${id}"
+    else
+      docker run -d -p 127.0.0.1:27017:27017 -v "$HOME/data":"/data/db" "$db_image" init "$admin_pw"
+    fi
+    ;;
+
+  mongodb:stop)
+    check_container
+    echo "-----> Stopping MongoDB server"
+    docker stop ${id}
+    ;;
+
+  mongodb:dump)
+    check_container
+    check_app
+    check_exists
+
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    manage dump "$database" "$name" "$admin_pw"
+
+    if [[ -f "$HOME/shared/$name" ]]; then
+      cat "$HOME/shared/$name"
+      rm -f "$HOME/shared/$name"
+    fi
+    ;;
+
+  mongodb:restore)
+    check_container
+    check_app
+    check_exists
+
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    cat - > "$HOME/shared/$name"
+
+    manage restore "$database" "$name" "$admin_pw"
+    rm -f "$HOME/shared/$name"
+    ;;
+
+  mongodb:status)
+    if [[ "$id" != "" ]]; then
+      echo "MongoDB container running with ID: ${id}"
+    else
+      echo "MongoDB container not running"
+    fi
+    ;;
+
+  mongodb:migrate)
+    migrate
+    ;;
+
+  mongodb:link)
+    check_container
+    check_app
+    check_exists
+
+    if [[ ! -f "$HOME/link_$3" ]]; then
+      echo "$APP" > "$HOME/link_$3"
+
+      restart_app $3
+    else
+      echo "A link already exist for $3"
+    fi
+    ;;
+
+  mongodb:unlink)
+    check_container
+    check_app
+    check_exists
+
+    if [[ -f "$HOME/link_$APP" ]]; then
+      rm -f "$HOME/link_$APP"
+    fi
+
+    restart_app $APP
+    ;;
+  mongodb:env)
+    env_for $APP
+    ;;
+
+  mongodb:install)
+    if [[ -d "$HOME" ]]; then
+      migrate
+      echo "MongoDB data already exist in "$HOME", installation aborded "
+    fi
+
+    if [[ ! -d "$HOME" ]]; then
+      mkdir -p "$HOME/data"
+      mkdir -p "$HOME/shared"
+
+      echo "$version" > "$HOME/version"
+
+      if [[ ! -f "$HOME/admin_pw" ]]; then
+        admin_pw=$(openssl rand -base64 32|base64)
+        echo $admin_pw > "$HOME/admin_pw"
+
+        chown -R dokku: "$HOME"
+        chmod 700 "$HOME/admin_pw"
+
+        if [[ ! -z "$DOKKU_DEV" ]]; then
+          ./commands mongodb:init
+        else
+          dokku mongodb:init
+        fi
+
+        # docker run "$db_image" cmd "cd /data/db && tar -cp ./" | tar -x -C "$HOME/data/" -f -
+        # docker run "$db_image" cmd "rm -rf /data/db && mkdir -p /data/db"
+        # docker run "$db_image" cmd "chown -R mongodb:mongodb /data/db"
+
+      fi
+    fi
+    ;;
+  mongodb:update)
+    if [[ $(id -un) = "dokku" ]]; then
+      dokku plugins-update
+    fi
+
+    DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    if [[ -d "$DIR/.git" ]]; then
+      pushd "$DIR"
+      dokku mongodb:stop
+      sudo git pull
+      docker rmi "$db_image"
+      docker pull "$db_image"
+      dokku mongodb:migrate
+      dokku mongodb:start
+      popd
+    fi
+    ;;
+  help)
+    cat && cat<<EOF
+    mongodb:console     <app>               Launch a MongoDB console for a given app
+    mongodb:env         <app>               Get generated environment variables for <app>
+    mongodb:url         <app>               Get DATABASE_URL for <app>
+    mongodb:create      <app>               Create a MongoDB database
+    mongodb:delete      <app>               Delete specified MongoDB database
+    mongodb:link        <app> <another_app> Give environment variable of database of <app> to <another_app>
+    mongodb:unlink      <another_app>       Unlink <another_app> to a database
+    mongodb:dump        <app> > <filename>  Dump database to SQL format
+    mongodb:restore     <app> < <filename>  Restore database from SQL format
+    mongodb:admin_console                   Launch a MongoDB console as admin user
+    mongodb:restart                         Restart the MongoDB docker container and linked app
+    mongodb:start                           Start the MongoDB docker container if it isn't running
+    mongodb:stop                            Stop the MongoDB docker container
+    mongodb:status                          Shows status of MongoDB
+    mongodb:list                            List all databases
+    mongodb:update                          Update this plugin
+    mongodb:migrate                         Migrate
+EOF
+    ;;
+esac

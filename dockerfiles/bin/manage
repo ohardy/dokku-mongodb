@@ -1,0 +1,88 @@
+#!/bin/bash
+#set -e;
+
+# ip=$(netstat -nr | grep '^0\.0\.0\.0' | awk '{print $2}')
+
+ip=$DB_PORT_27017_TCP_ADDR
+port=$DB_PORT_27017_TCP_PORT
+
+# _mysql () {
+#   #  echo "echo \"$cmd\" | $mysql"
+#   echo $1 | $2
+# }
+
+case "$1" in
+  start)
+    chown -R mongodb:mongodb /data/db
+    chmod -R 700 /data/db
+    mongod --auth
+  ;;
+
+  init)
+    admin_pw=$2
+    
+    mkdir -p /data/db
+
+    chown -R mongodb:mongodb /data/db
+    chmod -R 700 /data/db
+
+    mongod --fork --syslog
+
+    mongo --eval "db = db.getSiblingDB('admin'); db.createUser( { user: \"root\", pwd: \"$admin_pw\", roles: [ { role: \"userAdminAnyDatabase\", db: \"admin\" } ] } );"
+
+    mongod --shutdown
+
+  ;;
+  create)
+    name=$2
+    admin_pw=$3
+    database_pw=$4
+
+    # mongo -u root -p test --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.createUser( { user: \"test\", pwd: \"test\", roles: [ { role: \"readWrite\", db: \"test\" } ] } );"
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.createUser( { user: \"$name\", pwd: \"$database_pw\", roles: [ { role: \"readWrite\", db: \"$name\" } ] } );"
+
+  ;;
+  delete)
+    name=$2
+    admin_pw=$3
+
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.removeUser(\"$name\");"
+
+  ;;
+  admin_console)
+    admin_pw=$2
+
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin
+  ;;
+  list)
+    admin_pw=$2
+
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "printjson(db.getCollectionNames())"
+
+  ;;
+  # dump)
+  #   name=$2
+  #   filename=$3
+  #   admin_pw=$4
+  #   mysqldump -u root --password="$admin_pw" -h "$ip" -P "$port" "$name" > "/shared/$filename"
+  # ;;
+  # restore)
+  #   name=$2
+  #   filename=$3
+  #   admin_pw=$4
+  #
+  #   mysql -u root --password="$admin_pw" -h "$ip" -P "$port" "$name" < "/shared/$filename"
+  # ;;
+  console)
+    name=$2
+    database_pw=$3
+
+    mongo -u "$name" -p "$database_pw" --host "$ip" --port "$port" --authenticationDatabase admin
+  ;;
+  bash)
+    bash
+  ;;
+  cmd)
+    bash -c "$2"
+  ;;
+esac

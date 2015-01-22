@@ -1,0 +1,7 @@
+#!/bin/bash
+
+if [[ ! -z "$DOKKU_DEV" ]]; then
+  ./commands mongodb:update
+else
+  dokku mongodb:update
+fi
