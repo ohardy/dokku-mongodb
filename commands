@@ -2,7 +2,7 @@
 #set -e;
 
 _path=".o_mongodb"
-version="1.0"
+version="1.1"
 db_image="ohardy/mongodb"
 
 APP=$2

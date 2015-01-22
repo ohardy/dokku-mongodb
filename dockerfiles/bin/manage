@@ -20,7 +20,7 @@ case "$1" in
 
   init)
     admin_pw=$2
-    
+
     mkdir -p /data/db
 
     chown -R mongodb:mongodb /data/db
@@ -39,14 +39,14 @@ case "$1" in
     database_pw=$4
 
     # mongo -u root -p test --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.createUser( { user: \"test\", pwd: \"test\", roles: [ { role: \"readWrite\", db: \"test\" } ] } );"
-    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.createUser( { user: \"$name\", pwd: \"$database_pw\", roles: [ { role: \"readWrite\", db: \"$name\" } ] } );"
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('$name'); db.createUser( { user: \"$name\", pwd: \"$database_pw\", roles: [ { role: \"readWrite\", db: \"$name\" } ] } );"
 
   ;;
   delete)
     name=$2
     admin_pw=$3
 
-    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.removeUser(\"$name\");"
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('$name'); db.removeUser(\"$name\");"
 
   ;;
   admin_console)
