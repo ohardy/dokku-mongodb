@@ -60,6 +60,12 @@ case "$1" in
     mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "printjson(db.getCollectionNames())"
 
   ;;
+  shutdown)
+    admin_pw=$2
+
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db.shutdownServer({timeoutSecs: 60});"
+
+  ;;
   # dump)
   #   name=$2
   #   filename=$3

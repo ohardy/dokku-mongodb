@@ -277,6 +277,7 @@ case "$1" in
   mongodb:stop)
     check_container
     echo "-----> Stopping MongoDB server"
+    manage shutdown "$admin_pw"
     docker stop ${id}
     ;;
 
