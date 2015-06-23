@@ -63,7 +63,7 @@ case "$1" in
   shutdown)
     admin_pw=$2
 
-    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db.shutdownServer({timeoutSecs: 60});"
+    mongo -u root -p "$admin_pw" --host "$ip" --port "$port" --authenticationDatabase admin --eval "db = db.getSiblingDB('admin'); db.shutdownServer({timeoutSecs: 60});"
 
   ;;
   # dump)
