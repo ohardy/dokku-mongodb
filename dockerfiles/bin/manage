@@ -83,7 +83,7 @@ case "$1" in
     name=$2
     database_pw=$3
 
-    mongo -u "$name" -p "$database_pw" --host "$ip" --port "$port" --authenticationDatabase admin
+    mongo -u "$name" -p "$database_pw" --host "$ip" --port "$port" --authenticationDatabase "$name"
   ;;
   bash)
     bash
