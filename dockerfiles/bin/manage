@@ -11,6 +11,9 @@ port=$DB_PORT_27017_TCP_PORT
 #   echo $1 | $2
 # }
 
+
+# db.grantRolesToUser('root', [{role: 'root', db: 'admin'}]);
+
 case "$1" in
   start)
     chown -R mongodb:mongodb /data/db
